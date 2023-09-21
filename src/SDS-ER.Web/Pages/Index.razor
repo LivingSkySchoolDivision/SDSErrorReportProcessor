@@ -1,12 +1,184 @@
 ﻿@page "/"
+@using Microsoft.AspNetCore.Components.Forms;
+
+@code {
+    private bool isLoading = false;    
+    private long maxFileSize = 1024 * 1024 * 25; // 25 MB;
+    public string ExceptionMessage = string.Empty;
+    private List<string> errors = new List<string>();
+    public Dictionary<string, List<SDSErrorRecord>> ErrorsBySchool = new Dictionary<string, List<SDSErrorRecord>>();
+
+    Dictionary<string, School> SchoolsByDAN = new Dictionary<string, School>() {
+        { "5810211", new School("5810211","Battleford Central Elementary","bcs@lskysd.ca") },    
+        { "5850201", new School("5850201","Bready Elementary","bready@lskysd.ca") },
+        { "5010213", new School("5010213","Cando Community School","cando@lskysd.ca") },
+        { "5850401", new School("5850401","Connaught Elementary School","connaught@lskysd.ca") },
+        { "5910123", new School("5910123","Cut Knife Community School","ckcs@lskysd.ca") },
+        { "5710213", new School("5710213","Hafford Central School","hafford@lskysd.ca") },
+        { "6410721", new School("6410721","Hartley Clark Elementary School","hces@lskysd.ca") },
+        { "5894003", new School("5894003","Heritage Christian School","heritage@lskysd.ca") },
+        { "5910313", new School("5910313","Hillsvale Colony School","hillsvale@lskysd.ca") },
+        { "4410223", new School("4410223","Kerrobert Composite School","kcs@lskysd.ca") },
+        { "5911011", new School("5911011","Lakeview Colony School","lakeview@lskysd.ca") },
+        { "5850501", new School("5850501","Lawrence Elementary School","lawrence@lskysd.ca") },
+        { "6410313", new School("6410313","Leoville Central School","leoville@lskysd.ca") },
+        { "2020500", new School("2020500","Living Sky SD 202 Home School","office@lskysd.ca") },
+        { "4410323", new School("4410323","Luseland School","luseland@lskysd.ca") },
+        { "4410413", new School("4410413","Macklin School","macklin@lskysd.ca") },
+        { "5810713", new School("5810713","Maymont Central School","maymont@lskysd.ca") },
+        { "5850601", new School("5850601","McKitrick Community School","mckitrick@lskysd.ca") },
+        { "5910923", new School("5910923","McLurg High School","mclurg@lskysd.ca") },
+        { "6694003", new School("6694003","Meadow Lake Christian Academy","meadowlake@lskysd.ca") },
+        { "6410513", new School("6410513","Medstead Central School","medstead@lskysd.ca") },
+        { "5910911", new School("5910911","Norman Carter Elementary School","nces@lskysd.ca") },
+        { "5850904", new School("5850904","North Battleford Comprehensive High School","nbchs@lskysd.ca") },
+        { "5911113", new School("5911113","Scott Colony  School","scott@lskysd.ca") },
+        { "6410713", new School("6410713","Spiritwood High School","shs@lskysd.ca") },
+        { "5810221", new School("5810221","St. Vital Catholic School","stvital@lskysd.ca") },
+        { "5910813", new School("5910813","Unity Composite High School","uchs@lskysd.ca") },
+        { "5910711", new School("5910711","Unity Public School","ups@lskysd.ca") }
+    };
+
+    private async void LoadFile(InputFileChangeEventArgs e)
+    {
+        ExceptionMessage = string.Empty;
+        try {
+            ErrorsBySchool.Clear();  
+            string fullTempPath = string.Empty;
+
+            foreach(var file in e.GetMultipleFiles(1)) {
+                Console.WriteLine("Reading: " + file.Name);
+                
+                string newFileName = Path.ChangeExtension(Path.GetRandomFileName(), Path.GetExtension(file.Name));
+                string tempPath = Path.Combine(Path.GetTempPath(),"sds");
+
+                if (!File.Exists(tempPath)) {
+                    Directory.CreateDirectory(tempPath);
+                }
+
+                fullTempPath = Path.Combine(tempPath, newFileName);
+            
+                await using FileStream fs = new(fullTempPath, FileMode.Create);
+                await file.OpenReadStream(maxFileSize).CopyToAsync(fs);                           
+            }
+
+            // Parse the file      
+            ErrorsBySchool = ParseFile(fullTempPath);
+
+            // Delete the temporary file
+            File.Delete(fullTempPath);
+        } 
+        catch (Exception ex) {
+            ExceptionMessage = "Error parsing input file. The file may not have the correct headings or structure. Full error message:\n\n" + ex.Message;
+        }
+        StateHasChanged();
+    }
+
+    private Dictionary<string, List<SDSErrorRecord>>  ParseFile(string filename) {
+        // try to open the file and dump it's lines to the console  
+        FileInfo fi = new FileInfo(filename);
+
+        Dictionary<string, List<SDSErrorRecord>> ErrorsBySchool = new Dictionary<String, List<SDSErrorRecord>>();
+        
+        Console.WriteLine("Parsing " + filename);
+        using (StreamReader reader = new StreamReader(filename))
+        {
+            Dictionary<string, int> ColumnNamesToNumbers = new Dictionary<string, int>();
+
+            // Read the first line to get the headings
+            string firstLine = reader.ReadLine();
+            string[] firstLineValues = firstLine.Split(",");
+            int count = 0;
+            foreach (string colName in firstLineValues) 
+            {
+                ColumnNamesToNumbers.Add(colName.Trim().Trim('\"').Trim(), count);
+                count++;
+            }
+
+            // Complain if the file doesn't have the necesary bits
+            if (!ColumnNamesToNumbers.ContainsKey("DIVISION_ID")) { throw new Exception("File is missing field: DIVISION_ID"); }
+            if (!ColumnNamesToNumbers.ContainsKey("SCHOOL_ID")) { throw new Exception("File is missing field: SCHOOL_ID"); }
+            if (!ColumnNamesToNumbers.ContainsKey("SCHOOL_NAME")) { throw new Exception("File is missing field: SCHOOL_NAME"); }
+            if (!ColumnNamesToNumbers.ContainsKey("INDIVIDUAL_ID")) { throw new Exception("File is missing field: INDIVIDUAL_ID"); }
+            if (!ColumnNamesToNumbers.ContainsKey("RECORD_ID")) { throw new Exception("File is missing field: RECORD_ID"); }
+            if (!ColumnNamesToNumbers.ContainsKey("TIME")) { throw new Exception("File is missing field: TIME"); }
+            if (!ColumnNamesToNumbers.ContainsKey("MESSAGE_ID")) { throw new Exception("File is missing field: MESSAGE_ID"); }
+            if (!ColumnNamesToNumbers.ContainsKey("OBJECT_TYPE")) { throw new Exception("File is missing field: OBJECT_TYPE"); }
+            if (!ColumnNamesToNumbers.ContainsKey("MESSAGE")) { throw new Exception("File is missing field: MESSAGE"); }
+            
+            // Read the rest of the file for data
+            while(!reader.EndOfStream)
+            {
+                SDSErrorRecord parsedRecord = new SDSErrorRecord();
+                
+                string line = reader.ReadLine();
+                string[] values = line.Trim('\"').Split("\",\"");               
+                
+                //"DIVISION_ID","SCHOOL_ID","SCHOOL_NAME","INDIVIDUAL_ID","RECORD_ID","TIME","MESSAGE_ID","OBJECT_TYPE","MESSAGE"
+                if (ColumnNamesToNumbers.ContainsKey("DIVISION_ID")) { parsedRecord.DivisionID = values[ColumnNamesToNumbers["DIVISION_ID"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("SCHOOL_ID")) { parsedRecord.SchoolID = values[ColumnNamesToNumbers["SCHOOL_ID"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("SCHOOL_NAME")) { parsedRecord.SchoolName = values[ColumnNamesToNumbers["SCHOOL_NAME"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("INDIVIDUAL_ID")) { parsedRecord.IndividualID = values[ColumnNamesToNumbers["INDIVIDUAL_ID"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("RECORD_ID")) { parsedRecord.RecordID = values[ColumnNamesToNumbers["RECORD_ID"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("TIME")) { parsedRecord.Time = DateTime.Parse(values[ColumnNamesToNumbers["TIME"]]); }
+                if (ColumnNamesToNumbers.ContainsKey("MESSAGE_ID")) { parsedRecord.MessageID = values[ColumnNamesToNumbers["MESSAGE_ID"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("OBJECT_TYPE")) { parsedRecord.ObjectType = values[ColumnNamesToNumbers["OBJECT_TYPE"]]; }
+                if (ColumnNamesToNumbers.ContainsKey("MESSAGE")) { parsedRecord.Message = values[ColumnNamesToNumbers["MESSAGE"]]; }
+                
+                if (!ErrorsBySchool.ContainsKey(parsedRecord.SchoolID))
+                {
+                    ErrorsBySchool.Add(parsedRecord.SchoolID, new List<SDSErrorRecord>());
+                }
+                ErrorsBySchool[parsedRecord.SchoolID].Add(parsedRecord);
+            }
+
+            return ErrorsBySchool;
+        }
+
+    }
+
+    private void SendEmails() 
+    {
+        // TODO
+    }
+}
 
 <AuthorizeView>
     <Authorized>
-        <h1>Hello, world!</h1>
-        <div>
+
+        <h1>SDS Error Report Processor</h1>
+        <div style="position: absolute; top: 0; right: 0; padding :5px; border: 1px solid #C0C0C0; border-top: 0; border-right: 0; border-radius: 0 0 0 10px; background-color: #F0F0F0; font-family: sans-serif;">
             Logged in as <b>@context.User.Identity.Name</b>
         </div>
+        <InputFile OnChange="@LoadFile" accept=".csv" style="width: 500px;"/> 
+
+        @if(ErrorsBySchool.Count > 1) {
+            <button @onclick="SendEmails">Send Emails</button>
+            <br/>
+            <h1>Summary</h1>
+        }
+
+        <pre>@ExceptionMessage</pre>
         
+        @foreach(string DAN in ErrorsBySchool.Keys) 
+        {
+            School school = SchoolsByDAN.ContainsKey(DAN) ? SchoolsByDAN[DAN] : new School(string.Empty, "Unknown school", string.Empty);
+            
+            <div>
+            
+            <h4>@(school.Name) (@(ErrorsBySchool[DAN].Count)) - @(school.Email)</h4>
+            <ul>            
+            @foreach(SDSErrorRecord error in ErrorsBySchool[DAN]) {
+                <li>@(error.Time.ToShortDateString()) - @(error.IndividualID) - @(error.RecordID) - @(error.Message)</li>
+            }    
+            </ul>
+            </div>        
+        }
+        
+
+
+
+
     </Authorized>
     <NotAuthorized>
         <div class="main">

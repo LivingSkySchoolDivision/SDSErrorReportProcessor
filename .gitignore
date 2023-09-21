@@ -1,6 +1,9 @@
 # Standard CSharp .hgignore / .gitignore
 *.csv
 
+# Jetbrains IDE stuff
+.idea/
+
 # Visual Studio 2015 addition
 .vs/
 
